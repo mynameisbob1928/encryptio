@@ -1,0 +1,10 @@
+{
+	"name": "encryptio",
+	"version": "1.0.0",
+	"main": "main.js",
+	"author": "mynameisbob1928",
+	"license": "MIT Modified",
+	"dependencies": {
+		"crypto-js": "^4.2.0"
+	}
+}
