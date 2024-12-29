@@ -38,37 +38,82 @@ const { resolve, relative, dirname, join, isAbsolute, basename } = require('path
 let encPath = 'null';
 
 function encrypt(filepath, out = __dirname, key) {
+	if (!fs.existsSync(filepath)) return console.log(`The file at ${filepath} does not exist`);
 	out !== __dirname && !fs.existsSync(out) ? fs.mkdirSync(out, { recursive: true }) : null;
-	const file = `${filepath}~~|~~${encPath}~~|~~${fs.readFileSync(filepath, 'base64').slice(0, -2)}`;
-	fs.writeFileSync(`${out}/${AES.encrypt((filepath.split('/').slice(-1)[0].split('.')[0]), key).toString().replace(/\//g, '##')}`, AES.encrypt(file, key).toString(), 'utf8');
+
+	const fileinstream = fs.createReadStream(filepath, { encoding: 'base64' });
+	const fileoutstream = fs.createWriteStream(`${out}/${AES.encrypt((filepath.split('/').slice(-1)[0].split('.')[0]), key).toString().replace(/\//g, '##')}`, { encoding: 'utf8' });
+
+	fileoutstream.write(AES.encrypt(`${filepath}~~|~~${encPath}~~|~~`, key).toString());
+	fileinstream.on('data', chunk => fileoutstream.write(`-${AES.encrypt(chunk, key).toString()}`));
+
+	fileinstream.on('end', () => {
+		fileoutstream.close();
+	});
+
+	fileinstream.on('error', err => {
+		console.error(`Error reading file ${filepath}\n${err.message}\n${err.cause}`);
+		fileinstream.close();
+		fileoutstream.close();
+	});
 }
 
 function decrypt(filepath, out = null, key) {
-	const file = fs.readFileSync(`${filepath}`, 'utf8');
-	const decrypted = AES.decrypt(file, key).toString(enc.Utf8).split('~~|~~');
-	const origialPath = decrypted[0].replace(/\\\\/g, '/').replace(/\\/g, '/');
-	let outputPath = origialPath;
+	const fileinstream = fs.createReadStream(filepath, { encoding: 'utf8' });
+	let fileChunks = [];
 
-	if (decrypted[1] !== 'null' && out) {
-		const left = origialPath.replace(decrypted[1], '');
-		outputPath = relative(__dirname, (join(out, left)));
-	}
-	else if (out) {
-		if (isAbsolute(out)) outputPath = `${out}/${basename(decrypted[0])}`;
-		else outputPath = `${relative(__dirname, out)}\\${basename(decrypted[0])}`;
-		console.log(outputPath);
-	}
+	fileinstream.on('data', chunk => {
+		fileChunks.push(chunk);
+	});
 
-	const outputDir = dirname(outputPath);
-	if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+	fileinstream.on('end', () => {
 
-	fs.writeFileSync(outputPath, decrypted[2], 'base64');
+		const unEncChunks = [];
+		let hold = '';
+		while (fileChunks.length !== 0) {
+			const chunks = fileChunks[0].split('-');
+			fileChunks.shift();
+			if (chunks.length == 1) {
+				hold = hold + chunks[0];
+				continue;
+			}
+			unEncChunks.push(hold + chunks.shift());
+			hold = chunks.pop();
+			chunks.forEach(chunk => unEncChunks.push(chunk));
+		}
+		unEncChunks.push(hold);
+
+		fileChunks = unEncChunks.map(chunk => AES.decrypt(chunk, key).toString(enc.Utf8));
+		const decrypted = fileChunks[0].split('~~|~~');
+		decrypted.pop();
+		fileChunks[0] = fileChunks[0].replace(`${decrypted.join('~~|~~')}~~|~~`, '');
+		const origialPath = decrypted[0].replace(/\\\\/g, '/').replace(/\\/g, '/');
+		let outputPath = origialPath;
+
+		if (decrypted[1] !== 'null' && out) {
+			const left = origialPath.replace(decrypted[1], '');
+			outputPath = relative(__dirname, (join(out, left)));
+		}
+		else if (out) {
+			if (isAbsolute(out)) outputPath = `${out}/${basename(decrypted[0])}`;
+			else outputPath = `${!relative(__dirname, out) ? '.' : relative(__dirname, out)}\\${basename(decrypted[0])}`;
+		}
+		const outputDir = dirname(outputPath);
+		if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+
+		const fileoutstream = fs.createWriteStream(outputPath, { encoding: 'base64' });
+
+		for (const chunk of fileChunks) {
+			fileoutstream.write(chunk);
+		}
+	});
+
+
 }
 
 async function encryptfolder(dir, outputdir, key) {
 	let results = [];
 	encPath = dirname(resolve(dir, fs.readdirSync(dir)[0])).replace(/\\\\/g, '/').replace(/\\/g, '/');
-
 	async function walk(currentDir) {
 		const list = await fs.promises.readdir(currentDir);
 
@@ -81,15 +126,19 @@ async function encryptfolder(dir, outputdir, key) {
 					await walk(filePath);
 				}
 				else {
+					console.log(filePath);
 					results.push(filePath);
 				}
 			}),
 		);
 	}
 	await walk(`${dir}`);
+	console.log(results);
 	results.forEach(file => {
+		console.log(file);
 		encrypt(file, outputdir, key);
 	});
+
 }
 
 async function decryptfolder(dir, outputdir, key) {
@@ -105,7 +154,7 @@ if (args[0] == 'list') {
 	let a = false;
 	const files = fs.readdirSync(args[1]).map(filename => {
 		try {
-			return AES.decrypt(filename.replace(/##/g, '/'), args[2]).toString(enc.Utf8);
+			return `${AES.decrypt(filename.replace(/##/g, '/'), args[2]).toString(enc.Utf8)} - ${filename}`;
 		}
 		catch (err) {
 			if (err.message === 'Malformed UTF-8 data') {
@@ -141,5 +190,8 @@ process.on('uncaughtException', (error) => {
 	if (error.message == 'Malformed UTF-8 data') {
 		console.log('The key provided was invalid');
 		process.exit();
+	}
+	else {
+		console.log(error);
 	}
 });
