@@ -3,4 +3,4 @@ Can encrypt files, folders and also decrypt them still with relative folder stru
 
 Just download the main.js file, install the cryptojs module and run it. Instructions for how to use it are in the program
 
--# Note: large files can take a while to encrypt/decrypt
+Note: large files can take a while to encrypt/decrypt
