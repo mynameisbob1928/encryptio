@@ -126,16 +126,13 @@ async function encryptfolder(dir, outputdir, key) {
 					await walk(filePath);
 				}
 				else {
-					console.log(filePath);
 					results.push(filePath);
 				}
 			}),
 		);
 	}
 	await walk(`${dir}`);
-	console.log(results);
 	results.forEach(file => {
-		console.log(file);
 		encrypt(file, outputdir, key);
 	});
 
